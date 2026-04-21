@@ -92,7 +92,9 @@ export async function GET(request) {
             details.Vulnerability?.[0]?.Notes?.[0]?.Value
           ),
           description: details.Vulnerability?.[0]?.Notes?.[0]?.Value || '',
-          url: details.CvrfUrl,
+          url: details.CvrfUrl 
+            ? `https://msrc.microsoft.com/update-guide/vulnerability/${details.Alias}` 
+            : '#',
         }
         
         return NextResponse.json({ updates: [formatted] })
@@ -124,7 +126,7 @@ export async function GET(request) {
         category: categorizeUpdate(update.DocumentTitle, '', ''),
         // Link to official documentation page (MSRC update guide)
         url: update.CvrfUrl 
-          ? `https://msrc.microsoft.com/update-guide/${update.Alias}` 
+          ? `https://msrc.microsoft.com/update-guide/vulnerability/${update.Alias}` 
           : '#',
       }))
     
