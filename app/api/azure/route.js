@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
 import Parser from 'xml2js'
+import { categorizeUpdate, validateQueryParams } from '@/lib/utils'
 
 const AZURE_RSS_URL = 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss'
 
 async function fetchAzureUpdates() {
   const response = await fetch(AZURE_RSS_URL, {
-    cache: 'no-store'
+    next: { revalidate: 3600 } // Cache por 1 hora
   })
   
   if (!response.ok) {
-    throw new Error('Failed to fetch Azure updates')
+    throw new Error(`Azure RSS error: ${response.status} ${response.statusText}`)
   }
   
   const xml = await response.text()
@@ -29,40 +30,55 @@ async function fetchAzureUpdates() {
   }))
 }
 
-function categorizeAzure(title, categories) {
-  const text = `${title} ${categories.join(' ')}`.toLowerCase()
-  
-  if (text.includes('office') || text.includes('microsoft 365') || text.includes('excel') || text.includes('word') || text.includes('teams')) {
-    return 'office'
-  }
-  if (text.includes('windows') || text.includes('surface') || text.includes('edge') || text.includes('office')) {
-    return 'windows'
-  }
-  return 'azure'
-}
-
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
-    const limit = parseInt(searchParams.get('limit') || '20')
+    
+    // Validar parámetros
+    const validation = validateQueryParams(searchParams, {
+      limit: { type: 'number', default: 20, min: 1, max: 100 },
+      page: { type: 'number', default: 1, min: 1, max: 50 },
+    })
+    
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: 'Parámetros inválidos', details: validation.errors },
+        { status: 400 }
+      )
+    }
+    
+    const { limit, page } = validation.values
     
     const updates = await fetchAzureUpdates()
     
-    const formatted = updates.slice(0, limit).map(update => ({
+    // Paginación
+    const startIndex = (page - 1) * limit
+    const endIndex = startIndex + limit
+    const paginatedUpdates = updates.slice(startIndex, endIndex)
+    
+    const formatted = paginatedUpdates.map(update => ({
       id: update.id,
       title: update.title,
       description: update.description?.substring(0, 300) || '',
-      url: update.link, // Use 'url' for consistency with MSRC API
-      category: categorizeAzure(update.title, update.category),
+      url: update.link,
+      category: categorizeUpdate(update.title, '', update.description),
       status: Array.isArray(update.category) ? update.category[0] : 'Launched',
-      pubDate: update.pubDate,
+      releaseDate: update.pubDate,
     }))
     
-    return NextResponse.json({ updates: formatted })
+    return NextResponse.json({ 
+      updates: formatted,
+      pagination: {
+        page,
+        limit,
+        total: updates.length,
+        totalPages: Math.ceil(updates.length / limit),
+      }
+    })
   } catch (error) {
     console.error('Azure API Error:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch Azure updates', details: error.message },
+      { error: 'Error al obtener actualizaciones de Azure', details: error.message },
       { status: 500 }
     )
   }
